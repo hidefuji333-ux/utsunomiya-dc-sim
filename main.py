@@ -1,89 +1,101 @@
 import streamlit as st
-import pandas as pd
+import math
 
 # ページ設定
-st.set_page_config(page_title="宇都宮DCマスタープラン・シミュレーター", layout="wide")
+st.set_page_config(page_title="DCモジュール最適化シミュレーター", layout="wide")
 
-st.title("🏗️ 宇都宮GXデジタルキャンパス・シミュレーター")
-st.caption("プロフェッショナル設計・インフラ需要・コスト分析ツール")
+st.title("🏛️ DC モジュール詳細設計・最適化ツール")
+st.caption("ラック構成・空調機械室・電気設備を統合した最短設計シミュレーション")
 
-# --- サイドバー：主要変数 ---
+# --- サイドバー：変数入力 ---
 with st.sidebar:
-    st.header("1. 基本構成")
-    total_phases = st.slider("総フェーズ数", 1, 5, 5)
-    target_it_mw = st.number_input("最終IT容量合計 (MW)", value=333.0)
+    st.header("1. ラック・アイル構成")
+    rack_kw = st.number_input("ラックIT容量 (kW/台)", value=30.0)
+    rack_w = st.number_input("ラック幅 (m)", value=0.6)
+    rack_d = st.number_input("ラック奥行 (m)", value=1.2)
+    racks_per_row = st.number_input("1列のラック数", value=20)
+    cold_aisles = st.number_input("コールドアイル数", value=4)
     
-    st.header("2. データホール・ラック設計")
-    rack_power = st.slider("1ラック当たりIT容量 (kW)", 10.0, 50.0, 30.0)
-    racks_per_row = st.number_input("1列当たりのラック数", value=24)
-    rows_per_hall = st.number_input("1ホールの列数 (6の倍数推奨)", value=6, step=6)
+    st.header("2. 通路・空間設計")
+    ca_width = st.number_input("コールドアイル幅 (m)", value=1.8)
+    ha_width = st.number_input("ホットアイル幅 (m)", value=1.2)
+    perimeter_corridor = st.number_input("外周廊下幅 (m)", value=2.4)
     
-    st.header("3. 空調・インフラ設定")
-    pue = st.slider("目標PUE", 1.1, 1.5, 1.2)
-    air_cool_ratio = st.slider("空冷負荷比率 (%)", 50, 100, 70)
-    fwu_capacity = st.number_input("Fan Wall Unit単機能力 (kW)", value=400)
-    coc = st.slider("冷却水濃縮倍数 (CoC)", 3.0, 6.0, 4.0)
+    st.header("3. 冷却システム (FWU設計)")
+    cooling_type = st.selectbox("空調配置方式", ["片側吹き (Single Side)", "対面吹き (Dual Side)"])
+    fwu_cap = st.number_input("FWU1台の冷却能力 (kW)", value=400)
+    fwu_w = st.number_input("FWU1台の幅 (m)", value=2.4)
+    fwu_d = st.number_input("FWU機械室の奥行 (m)", value=4.0)
+    liquid_ratio = st.slider("液冷(DLC)比率 (%)", 0, 100, 30) / 100
+
+    st.header("4. 電気・冗長性")
+    ups_n_plus = st.selectbox("UPS冗長構成", ["N+1", "2N", "Distributed Redundancy"])
+    gen_redundancy = st.slider("発電機冗長(N+x)", 1, 2, 1)
 
 # --- 計算ロジック ---
-# 1モジュール（データホール）あたりのIT容量
-module_racks = racks_per_row * rows_per_hall
-module_it_kw = module_racks * rack_power
-num_modules = (target_it_mw * 1000) / module_it_kw
 
-# 物理寸法（概算）
-hall_width = (rows_per_hall * 1.2) + (3 * 1.8) + (4 * 1.6) + (2.4 * 2)
-hall_length = (racks_per_row * 0.6) + 5.0
-module_area = hall_width * hall_length
+# A. IT容量計算
+rows = cold_aisles * 2
+total_racks = racks_per_row * rows
+total_it_mw = (total_racks * rack_kw) / 1000
+air_heat_load_kw = total_it_mw * 1000 * (1 - liquid_ratio)
 
-# 水量計算
-total_heat_kw = target_it_mw * 1000 * (1 + (pue - 1) * 0.7) # 簡易熱負荷計算
-evap_l_h = total_heat_kw * 1.6
-makeup_l_h = evap_l_h * (coc / (coc - 1))
-daily_water_m3 = (makeup_l_h * 24) / 1000
+# B. データホール内寸計算 (ラック・アイル領域)
+# 長手方向 (Length) = ラック幅 * 台数 + 余裕
+hall_length = (racks_per_row * rack_w) + 2.0 
 
-# --- メイン画面表示 ---
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("最終IT容量", f"{target_it_mw} MW")
-col2.metric("必要ラック総数", f"{int(target_it_mw * 1000 / rack_power)} 台")
-col3.metric("1日の必要水量", f"{daily_water_m3:,.0f} m3")
-col4.metric("データホール数", f"{num_modules:.1f} 室")
+# 短手方向 (Width) = (ラック奥行*列) + (CA幅*CA数) + (HA幅*HA数)
+hall_width_pure = (rows * rack_d) + (cold_aisles * ca_width) + (cold_aisles * ha_width)
+hall_width_with_corridor = hall_width_pure + (perimeter_corridor * 2)
 
-# 水量アラート
-if daily_water_m3 > 19000:
-    st.error(f"⚠️ 警告: 水量が市の供給上限 (19,000 m3) を超えています！ (現在: {daily_water_m3:,.0f} m3)")
-else:
-    st.success("✅ 水量は市の供給範囲内です。")
+# C. 空調機械室 (FWU) 計算
+fwu_needed_qty = math.ceil(air_heat_load_kw / fwu_cap) + 2 # N+2 冗長
+if cooling_type == "対面吹き (Dual Side)":
+    fwu_per_side = math.ceil(fwu_needed_qty / 2)
+    fwu_room_width = fwu_per_side * fwu_w
+    # 長手方向に収まるかチェック
+    room_length_check = "OK" if fwu_room_width <= hall_length else "要調整 (壁面長不足)"
+    total_module_length = hall_length + (fwu_d * 2)
+else: # 片側
+    fwu_room_width = fwu_needed_qty * fwu_w
+    room_length_check = "OK" if fwu_room_width <= hall_length else "要調整 (壁面長不足)"
+    total_module_length = hall_length + fwu_d
 
-# --- タブ分け詳細表示 ---
-tab1, tab2, tab3 = st.tabs(["📊 フェーズ別推移", "📐 モジュール詳細設計", "📝 市役所提出用数値"])
+# D. 全体面積
+total_area = total_module_length * hall_width_with_corridor
 
-with tab1:
-    st.subheader("段階的増強計画")
-    phases = [f"Phase {i+1}" for i in range(total_phases)]
-    it_steps = [target_it_mw / total_phases * (i+1) for i in range(total_phases)]
-    water_steps = [daily_water_m3 / total_phases * (i+1) for i in range(total_phases)]
-    df = pd.DataFrame({"IT容量 (MW)": it_steps, "必要水量 (m3/day)": water_steps}, index=phases)
-    st.line_chart(df)
-    st.table(df)
+# --- 結果表示 ---
+st.header("🏢 モジュール設計最適化結果")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("総IT容量", f"{total_it_mw:.2f} MW")
+c2.metric("総ラック数", f"{total_racks} 台")
+c3.metric("モジュール総面積", f"{total_area:.1f} m2")
+c4.metric("空冷負荷", f"{air_heat_load_kw:,.0f} kW")
 
-with tab2:
-    st.subheader("1データホール（モジュール）の構成")
-    c1, c2 = st.columns(2)
-    c1.write(f"**IT容量:** {module_it_kw:,.0f} kW")
-    c1.write(f"**ラック数:** {module_racks} 台")
-    c1.write(f"**概算面積:** {module_area:.1f} m2")
+st.divider()
+
+# 詳細分析
+col_a, col_b = st.columns([2, 1])
+
+with col_a:
+    st.subheader("📐 平面構成の詳細")
+    st.write(f"**データホール内寸:** {hall_length:.1f}m (L) × {hall_width_with_corridor:.1f}m (W)")
+    st.write(f"**空調機械室:** {fwu_d}m (D) × {hall_width_with_corridor:.1f}m (W) ※{cooling_type}")
     
-    fwu_needed = (module_it_kw * air_cool_ratio / 100) / fwu_capacity
-    c2.write(f"**必要Fan Wall台数:** {fwu_needed:.1f} 台 (N+2を推奨)")
-    c2.write(f"**UPS必要容量:** {module_it_kw * 1.1 / 0.9:.0f} kVA")
+    st.info(f"💡 **設計チェック:** FWU設置壁面の有効長さは {hall_length:.1f}m です。必要幅 {fwu_room_width:.1f}m に対して **{room_length_check}** です。")
 
-with tab3:
-    st.subheader("市役所ヒアリング用サマリー")
-    st.code(f"""
-    【事業計画概要】
-    ・最終IT負荷: {target_it_mw} MW
-    ・最大使用水量: {daily_water_m3:,.0f} m3/day
-    ・排水量(推定): {daily_water_m3 * 0.25:,.0f} m3/day
-    ・受電電圧: 154kV
-    ・建物構造: 免震構造推奨
-    """)
+with col_b:
+    st.subheader("⚙️ 設備構成")
+    st.write(f"**FWU必要台数:** {fwu_needed_qty} 台 (N+2込)")
+    st.write(f"**UPS想定:** {(total_it_mw * 1.2):.1f} MVA (IT負荷+マージン)")
+    st.write(f"**液冷分受熱量:** {total_it_mw * liquid_ratio * 1000:,.0f} kW")
+
+# 断面イメージの代わりの表
+st.subheader("📋 スペース効率分析")
+eff_df = pd.DataFrame({
+    "項目": ["IT面積比率", "空調/設備面積比率", "ラック密度"],
+    "数値": [f"{(hall_length*hall_width_pure)/total_area:.1%}", 
+            f"{(total_area - hall_length*hall_width_pure)/total_area:.1%}",
+            f"{total_it_mw*1000/total_area:.2f} kW/m2"]
+})
+st.table(eff_df)
