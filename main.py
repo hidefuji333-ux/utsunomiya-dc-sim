@@ -10,7 +10,7 @@ st.title("🏗️ DCモジュール設計・詳細可視化ツール")
 
 # --- サイドバー：入力パラメータ ---
 with st.sidebar:
-    st.header("1. ラック・アイル構成")
+    st.header("1. IT・ラック構成")
     rack_kw = st.number_input("1ラックIT容量 (kW)", value=30.0)
     racks_per_row = st.number_input("1列のラック数", value=20)
     cold_aisles = st.number_input("コールドアイル数 (1CA=2列)", value=4)
@@ -49,36 +49,38 @@ else: effective_ups_kva = ups_capacity_kva * ups_n
 ups_ok = (total_it_kw / ups_pf) <= effective_ups_kva
 gen_ok = (gen_capacity_kva * (gen_n - 1)) >= total_load_kva
 
-# --- ビジュアル表示 (平面図の精緻化) ---
+# --- ビジュアル表示 (平面図) ---
 fig = go.Figure()
 
-# 描画用の寸法設定
-r_w, r_d = 0.6, 1.2 # ラックサイズ固定
+# 寸法設定
+r_w, r_d = 0.6, 1.2 # ラックサイズ
 hall_length = racks_per_row * r_w
 hall_width = (cold_aisles * 2 * r_d) + (cold_aisles * ca_width) + (cold_aisles * ha_width)
 
-# 1. データホールエリアの背景
+# 1. データホールエリア
 fig.add_shape(type="rect", x0=0, y0=0, x1=hall_length, y1=hall_width, fillcolor="ghostwhite", line=dict(color="black", width=2))
 
-# 2. ラック列とアイルの描画
+# 2. ラック列とアイル
 current_y = 0
 for i in range(int(cold_aisles)):
-    # ホットアイル(HA)領域
-    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + ha_width, fillcolor="lavenderblush", opacity=0.5, line_width=0)
+    # ホットアイル(HA)
+    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + ha_width, fillcolor="rgba(255,0,0,0.1)", line_width=0)
     current_y += ha_width
     
-    # ラック列1 (HAに面する)
-    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + r_d, fillcolor="red", opacity=0.8, name="Rack Row")
+    # ラック列1 (Hot側)
+    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + r_d, fillcolor="red", opacity=0.7)
     current_y += r_d
     
-    # コールドアイル(CA)領域
-    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + ca_width, fillcolor="aliceblue", opacity=0.5, line_width=0)
+    # コールドアイル(CA)
+    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + ca_width, fillcolor="rgba(0,0,255,0.1)", line_width=0)
     current_y += ca_width
     
-    # ラック列2 (CAに面する)
-    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + r_d, fillcolor="blue", opacity=0.8)
+    # ラック列2 (Cold側)
+    fig.add_shape(type="rect", x0=0, y0=current_y, x1=hall_length, y1=current_y + r_d, fillcolor="blue", opacity=0.7)
     current_y += r_d
 
-# 3. Fan Wall Unit (壁際に並べるイメージ)
+# 3. Fan Wall Unit (FWU) の描画
+fwu_width_visual = 2.0 # 描画上のFWU幅
 for j in range(fwu_needed_qty):
-    x_pos =
+    # FWUをホールの長手方向に等間隔で配置
+    spacing
