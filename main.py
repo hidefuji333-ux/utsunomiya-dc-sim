@@ -53,4 +53,52 @@ total_area = total_length * total_width
 fig = go.Figure()
 
 # 1. モジュール全体の枠（外壁）
-fig.add_shape(type="rect", x0
+fig.add_shape(type="rect", x0=0, y0=0, x1=total_length, y1=total_width, 
+              line=dict(color="Black", width=3), fillcolor="White")
+
+# 2. データホールエリア (青色)
+fig.add_shape(type="rect", x0=hall_start_x, y0=corridor, 
+              x1=hall_start_x + inner_length, y1=corridor + inner_width, 
+              fillcolor="rgba(0, 176, 246, 0.2)", line=dict(color="Blue", width=2))
+
+# 3. 空調機械室 (オレンジ色)
+# 左側（または片側）
+fig.add_shape(type="rect", x0=fwu_left_x, y0=corridor, x1=fwu_left_x + fwu_d, y1=total_width - corridor, 
+              fillcolor="rgba(255, 127, 14, 0.5)", line=dict(color="Orange", width=1))
+# 右側（対面の場合）
+if cooling_type == "対面吹き (Dual Side)":
+    fig.add_shape(type="rect", x0=fwu_right_x, y0=corridor, x1=fwu_right_x + fwu_d, y1=total_width - corridor, 
+                  fillcolor="rgba(255, 127, 14, 0.5)", line=dict(color="Orange", width=1))
+
+# レイアウト設定
+fig.update_layout(
+    title="モジュール簡易平面図 (Top View)",
+    xaxis=dict(title="長さ (m)", showgrid=True, zeroline=False),
+    yaxis=dict(title="幅 (m)", showgrid=True, zeroline=False, scaleanchor="x", scaleratio=1),
+    width=900, height=600,
+    plot_bgcolor='white'
+)
+
+# --- 表示エリア ---
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.subheader("📊 主要メトリクス")
+    st.metric("総IT容量", f"{total_it_mw:.2f} MW")
+    st.metric("モジュール総面積", f"{total_area:.1f} ㎡")
+    st.write(f"**総ラック数:** {total_racks} 台")
+    st.write(f"**建物外寸:** {total_length:.1f}m × {total_width:.1f}m")
+    
+    st.subheader("💡 設計効率")
+    it_efficiency = (inner_length * inner_width) / total_area
+    st.write(f"**IT面積効率:** {it_efficiency:.1%}")
+    st.write(f"**電力密度:** {total_it_mw*1000/total_area:.2f} kW/㎡")
+
+with col2:
+    st.plotly_chart(fig, use_container_width=True)
+
+# 補足情報
+with st.expander("詳細な面積内訳を確認"):
+    st.write(f"・データホール純面積: {inner_length * inner_width:.1f} ㎡")
+    st.write(f"・空調機械室面積: {fwu_d * (total_width - corridor*2) * (2 if cooling_type=='対面吹き (Dual Side)' else 1):.1f} ㎡")
+    st.write(f"・廊下/壁体面積: {total_area - (inner_length*inner_width) - (fwu_d*(total_width-corridor*2)*(2 if cooling_type=='対面吹き (Dual Side)' else 1)):.1f} ㎡")
