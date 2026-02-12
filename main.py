@@ -3,118 +3,91 @@ import plotly.graph_objects as go
 import math
 import pandas as pd
 
-# 1. ページ基本設定
-st.set_page_config(page_title="Professional DC Design Tool", layout="wide")
-st.title("🏙️ DC Strategic Module Designer: Pro-Edition")
-st.markdown("---")
+# --- ページ基本設定 ---
+st.set_page_config(page_title="DC Optimization Engine", layout="wide")
+st.title("🏙️ DC Module Architecture Optimizer")
+st.caption("UPS 7.2MW標準機軸の『建築×設備』整合性シミュレーター")
 
-# 2. 入力パラメータ (サイドバー)
+# --- サイドバー：基準設定 ---
 with st.sidebar:
-    st.header("1. Rack Configuration")
-    rack_kw = st.number_input("IT Load per Rack (kW)", value=30.0, step=1.0)
-    r_w = st.number_input("Rack Width (m)", value=0.6, step=0.1)
-    r_d = st.number_input("Rack Depth (m)", value=1.2, step=0.1)
-    racks_per_row = st.number_input("Racks per Row", value=20, step=1)
-    cac_count = st.number_input("Number of Cold Aisles (CAC)", value=4, step=1)
-    
-    st.header("2. Aisle & Infrastructure (m)")
-    ca_w = st.number_input("Cold Aisle Width (m)", value=1.8, step=0.1)
-    ha_w = st.number_input("Hot Aisle Width (m)", value=1.2, step=0.1)
-    corridor_w = st.number_input("Corridor Width (m)", value=2.4, step=0.1)
-    fwu_depth = 4.0        
-    
-    st.header("3. Cooling Strategy")
-    liquid_ratio = st.slider("DLC Ratio (%)", 0, 100, 30) / 100
-    fwu_cap = st.number_input("FWU Capacity (kW/unit)", value=400)
-    cooling_mode = st.selectbox("Cooling Path", ["Single Side", "Dual Side"])
+    st.header("⚡ 電力量の基準 (UPS)")
+    ups_unit_mw = st.number_input("UPS単機容量 (MW)", value=2.4)
+    ups_n = st.number_input("UPS台数 (3+1等の稼働台数N)", value=3)
+    target_it_mw = ups_unit_mw * ups_n
+    st.info(f"ターゲットIT容量: {target_it_mw:.1f} MW")
 
-# 3. 計算ロジック
-total_racks = int(racks_per_row * cac_count * 2)
-it_kw = float(total_racks * rack_kw)
-air_load_kw = it_kw * (1.0 - liquid_ratio)
-fwu_n = math.ceil(air_load_kw / fwu_cap) + 2
+    st.header("❄️ 冷却スペック (FWU)")
+    fwu_cap = st.number_input("FWU単機冷却能力 (kW)", value=420.0)
+    fwu_w_unit = st.number_input("FWU1台の必要壁面幅 (m)", value=4.3)
+    liquid_ratio = st.slider("DLC(液冷)比率 (%)", 0, 100, 30) / 100
+    cooling_type = st.selectbox("空調配置", ["片面吹き", "両面吹き(対面)"])
 
-# 物理寸法
-h_l = racks_per_row * r_w
-h_w = (cac_count * 2 * r_d) + (cac_count * ca_w) + (cac_count * ha_w)
-total_l = h_l + (fwu_depth * (2 if cooling_mode == "Dual Side" else 1)) + (corridor_w * 2)
+    st.header("📦 ラック仕様")
+    rack_kw = st.number_input("1ラック容量 (kW)", value=30.0)
+    r_w, r_d = 0.6, 1.2
+    ca_w, ha_w = 1.8, 1.6
+    corridor_w = 3.0
+
+# --- 最適化計算ロジック ---
+# 1. 必要なラック総数
+total_racks_needed = math.ceil((target_it_mw * 1000) / rack_kw)
+
+# 2. 空調負荷と必要FWU数
+air_load_kw = (target_it_mw * 1000) * (1.0 - liquid_ratio)
+fwu_count = math.ceil(air_load_kw / fwu_cap) + 1 # N+1
+total_fwu_width = fwu_count * fwu_w_unit
+if cooling_type == "両面吹き(対面)":
+    total_fwu_width /= 2
+
+# 3. レイアウト探索 (6列の倍数で最適な1列台数を探す)
+# ターゲット：データホールの長さ(racks * r_w) ≒ total_fwu_width
+best_diff = float('inf')
+best_racks_per_row = 0
+best_rows = 0
+
+for row_option in [6, 12, 18, 24]:
+    racks_per_row_calc = math.ceil(total_racks_needed / row_option)
+    hall_len = racks_per_row_calc * r_w
+    diff = abs(hall_len - total_fwu_width)
+    if diff < best_diff:
+        best_diff = diff
+        best_racks_per_row = racks_per_row_calc
+        best_rows = row_option
+
+# 最終確定値
+h_l = best_racks_per_row * r_w
+h_w = (best_rows * r_d) + (best_rows/2 * (ca_w + ha_w)) # 簡易計算
+total_l = h_l + 4.0 + (corridor_w * 2) # 4.0はFWUヤード奥行
 total_w = h_w + (corridor_w * 2)
 
-# 4. 指標表示
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Total IT Load", f"{it_kw/1000:.2f} MW")
-m2.metric("Total Racks", f"{total_racks} units")
-m3.metric("Air Cooling Load", f"{air_load_kw/1000:.2f} MW")
-m4.metric("Module Area", f"{total_l * total_w:.1f} m2")
+# --- 表示エリア ---
+c1, c2, c3 = st.columns(3)
+c1.metric("IT Capacity", f"{target_it_mw:.1f} MW")
+c2.metric("Rack Count", f"{best_racks_per_row}台 × {best_rows}列")
+# 効率判定
+space_match = (1 - (best_diff / h_l)) * 100
+c3.metric("Space Efficiency", f"{space_match:.1f} %", help="FWU壁面幅とホール長の合致率")
 
-# 5. 高精細レイアウト描画 (Plotly)
+# --- Plotly 描画 ---
 fig = go.Figure()
-off_x = corridor_w + fwu_depth
-off_y = corridor_w
+# データホール
+fig.add_shape(type="rect", x0=0, y0=0, x1=h_l, y1=h_w, line=dict(color="black", width=2))
+# FWUヤード (オレンジ)
+fig.add_shape(type="rect", x0=-4.0, y0=0, x1=0, y1=h_w, fillcolor="rgba(255,165,0,0.2)", line=dict(color="orange"))
+# ラック列の描画 (簡易)
+for r in range(best_rows):
+    color = "gold"
+    fig.add_shape(type="rect", x0=0, y0=r*2.5, x1=h_l, y1=r*2.5+r_d, fillcolor=color)
 
-# 5a. 建築外郭
-fig.add_shape(type="rect", x0=0, y0=0, x1=total_l, y1=total_w, line=dict(color="#333", width=3), fillcolor="#fdfdfd")
+fig.update_layout(title="Optimal DH Layout: Space & Cooling Balanced", xaxis=dict(scaleanchor="y"), width=1000, height=600)
+st.plotly_chart(fig)
 
-# 5b. 空調機械室 (Orange)
-fig.add_shape(type="rect", x0=corridor_w, y0=off_y, x1=corridor_w + fwu_depth, y1=off_y + h_w, 
-              fillcolor="rgba(255, 165, 0, 0.15)", line=dict(color="orange", width=1))
-if cooling_mode == "Dual Side":
-    fig.add_shape(type="rect", x0=off_x + h_l, y0=off_y, x1=off_x + h_l + fwu_depth, y1=off_y + h_w, 
-                  fillcolor="rgba(255, 165, 0, 0.15)", line=dict(color="orange", width=1))
-
-# 5c. アイル・ラック列 (1ラックごとに描画)
-curr_y = off_y
-for i in range(cac_count):
-    # Hot Aisle (Red)
-    fig.add_shape(type="rect", x0=off_x, y0=curr_y, x1=off_x + h_l, y1=curr_y + ha_w, 
-                  fillcolor="rgba(255, 0, 0, 0.05)", line=dict(width=0))
-    curr_y += ha_w
-    # Rack Row A (Yellow Segmented)
-    for r in range(racks_per_row):
-        fig.add_shape(type="rect", x0=off_x + (r * r_w), y0=curr_y, x1=off_x + ((r+1) * r_w), y1=curr_y + r_d,
-                      fillcolor="#FFD700", line=dict(color="black", width=0.5))
-    curr_y += r_d
-    # Cold Aisle (CAC Blue)
-    fig.add_shape(type="rect", x0=off_x, y0=curr_y, x1=off_x + h_l, y1=curr_y + ca_w, 
-                  fillcolor="rgba(0, 200, 255, 0.25)", line=dict(color="blue", width=2))
-    curr_y += ca_w
-    # Rack Row B (Yellow Segmented)
-    for r in range(racks_per_row):
-        fig.add_shape(type="rect", x0=off_x + (r * r_w), y0=curr_y, x1=off_x + ((r+1) * r_w), y1=curr_y + r_d,
-                      fillcolor="#FFD700", line=dict(color="black", width=0.5))
-    curr_y += r_d
-
-# 5d. FWUシンボル描画
-fwu_per_side = math.ceil(fwu_n / 2) if cooling_mode == "Dual Side" else fwu_n
-for k in range(fwu_per_side):
-    y_u = off_y + (k * (h_w / fwu_per_side))
-    h_u = (h_w / fwu_per_side) * 0.8
-    fig.add_shape(type="rect", x0=corridor_w + 0.5, y0=y_u + (h_u*0.1), x1=corridor_w + 3.5, y1=y_u + h_u, fillcolor="orange")
-    if cooling_mode == "Dual Side":
-        fig.add_shape(type="rect", x0=off_x + h_l + 0.5, y0=y_u + (h_u*0.1), x1=off_x + h_l + 3.5, y1=y_u + h_u, fillcolor="orange")
-
-# 5e. 寸法線 (Annotations)
-fig.add_annotation(x=off_x + h_l/2, y=off_y - 1.5, text=f"Hall Length: {h_l:.1f}m", showarrow=False, font=dict(size=14))
-fig.add_annotation(x=off_x - 1.5, y=off_y + h_w/2, text=f"Hall Width: {h_w:.1f}m", textangle=-90, showarrow=False, font=dict(size=14))
-
-# 5f. 凡例設定 (Pseudo-legend)
-legend_labels = [("Server Rack", "#FFD700"), ("Cold Aisle (CAC)", "blue"), ("Hot Aisle", "rgba(255, 0, 0, 0.2)"), ("FWU (Cooling Unit)", "orange")]
-for name, color in legend_labels:
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=15, color=color, symbol='square'), showlegend=True, name=name))
-
-fig.update_layout(
-    title=dict(text="Detailed DC Module Strategic Layout", font=dict(size=24)),
-    xaxis=dict(showgrid=False, zeroline=False, scaleanchor="y", scaleratio=1),
-    yaxis=dict(showgrid=False, zeroline=False),
-    plot_bgcolor='white', width=1200, height=900
-)
-st.plotly_chart(fig, use_container_width=True)
-
-# 6. スペック詳細
-st.subheader("📋 Modular Component Specifications")
-spec_df = pd.DataFrame({
-    "Component": ["Data Hall", "FWU Room", "Module Total"],
-    "Dimensions (L x W)": [f"{h_l:.1f} x {h_w:.1f} m", f"{fwu_depth:.1f} x {h_w:.1f} m", f"{total_l:.1f} x {total_w:.1f} m"],
-    "Area (m2)": [f"{h_l*h_w:.1f}", f"{fwu_depth*h_w:.1f}", f"{total_l*total_w:.1f}"]
-})
-st.table(spec_df)
+# --- コンサルタントの深掘り質問 ---
+st.markdown("---")
+st.subheader("🧐 さらなる最適化のための深掘りポイント")
+st.write("""
+このロジックで「収まり」は見えましたが、実務上以下の点が「本当の悩み」に関わっていませんか？
+1. **1列の最大台数制限**: ハイパースケーラーによって「1列は最大24台まで」等の制約がありますか？（現在は無制限に計算）
+2. **FWUの『余り』の扱い**: FWU幅がホール長より短い場合、余った壁面をどう活用しますか？（電気室の拡張、予備スペースなど）
+3. **DLCの熱回収**: 液冷分の30%〜の熱は、どの経路で外に逃がしますか？（水冷配管ルートの確保が必要）
+""")
